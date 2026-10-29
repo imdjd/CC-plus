@@ -3,6 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>Start CC+</AssemblyName>
     <RootNamespace>CCPlusLauncher</RootNamespace>
@@ -14,7 +15,4 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="CCPlusTool.ps1" LogicalName="CCPlusTool.ps1" />
-  </ItemGroup>
 </Project>
