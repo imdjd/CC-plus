@@ -12,4 +12,3 @@ Build from source: run dotnet publish CCPlusLauncher.csproj -c Release and use b
 
 Safety: package changes back up manifests and ask for confirmation. Clear Cache deletes everything inside the selected folder; check its path and close VRChat first. Project dependencies live in Packages\vpm-manifest.json.
 
-Antivirus: no software can guarantee a 0-detection result. Check the release checksum and report false positives to the scanner vendor; do not disable antivirus.
