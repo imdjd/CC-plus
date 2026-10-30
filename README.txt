@@ -1,5 +1,7 @@
 CC+ for VRChat Creator Companion (Windows x64)
 
+CC+ is a lightweight Windows companion tool for managing VRChat project packages, finding projects, and maintaining the local package cache.
+
 Download Start CC+.exe from the latest GitHub Release and run it. The self-contained app needs no installation, .NET runtime, or PowerShell.
 
 - Packages: choose a template or project Packages\vpm-manifest.json to add, remove, or update packages. Restore Repo Packages uses VCC's local repo cache.
