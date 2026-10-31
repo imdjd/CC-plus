@@ -3,15 +3,13 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text.Json.Nodes;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
 internal sealed class NativeWindow : Form
 {
     private readonly TabControl tabs = new() { Dock = DockStyle.Fill };
-    private readonly TabPage packagesTab = new("Packages"), cacheTab = new("Cache"), settingsTab = new("Settings"), projectsTab = new("Find Projects");
+    private readonly TabPage packagesTab = new("Packages"), settingsTab = new("Settings");
     private readonly Label status = new() { AutoSize = true, Padding = new Padding(3) };
     private readonly Label manifestLabel = new() { AutoSize = true, Padding = new Padding(3) };
     private readonly TextBox search = new() { Width = 280, PlaceholderText = "Search packages" };
@@ -20,12 +18,6 @@ internal sealed class NativeWindow : Form
     private readonly Button undoButton = new() { Text = "Undo Last Copy", AutoSize = true };
     private readonly TextBox cachePath = new() { Width = 650 };
     private readonly Label cacheInfo = new() { AutoSize = true };
-    private readonly Label settingsInfo = new() { AutoSize = true, MaximumSize = new System.Drawing.Size(850, 0) };
-    private readonly ListBox projectResults = new() { Dock = DockStyle.Fill, HorizontalScrollbar = true };
-    private readonly Button scanButton = new() { Text = "Search Drives", AutoSize = true };
-    private readonly Button cancelButton = new() { Text = "Cancel", Enabled = false, AutoSize = true };
-    private readonly Label scanInfo = new() { AutoSize = true, Text = "Search is read-only. Inaccessible folders are skipped." };
-    private CancellationTokenSource? scanCancellation;
     private List<PackageInfo> catalog = new();
     private string? manifestPath;
 
@@ -37,11 +29,9 @@ internal sealed class NativeWindow : Form
         StartPosition = FormStartPosition.CenterScreen;
         Font = new System.Drawing.Font("Segoe UI", 9);
         Controls.Add(tabs);
-        tabs.TabPages.AddRange(new[] { packagesTab, cacheTab, settingsTab, projectsTab });
+        tabs.TabPages.AddRange(new[] { packagesTab, settingsTab });
         BuildPackages();
-        BuildCache();
         BuildSettings();
-        BuildProjects();
         manifestPath = new[] { "Avatar", "Avatar 2019" }
             .Select(name => Template(name)).FirstOrDefault(File.Exists);
         cachePath.Text = Path.Combine(ManifestStore.VccRoot, "Repos");
@@ -131,7 +121,9 @@ internal sealed class NativeWindow : Form
         var all = catalog.ToDictionary(entry => entry.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var (id, version) in installed)
             if (!all.ContainsKey(id)) all[id] = new PackageInfo(id, id, version, new List<string> { version });
-        foreach (var package in all.Values.OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var package in all.Values
+                 .OrderByDescending(entry => installed.ContainsKey(entry.Id))
+                 .ThenBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase))
         {
             var isInstalled = installed.TryGetValue(package.Id, out var current);
             if (filter.SelectedItem?.ToString() == "Installed" && !isInstalled || filter.SelectedItem?.ToString() == "Available" && isInstalled) continue;
@@ -261,18 +253,6 @@ internal sealed class NativeWindow : Form
         status.Text = "Last copy undone.";
     }
 
-    private void BuildCache()
-    {
-        var layout = Row();
-        cacheTab.Controls.Add(layout);
-        layout.Controls.Add(cachePath);
-        layout.Controls.Add(Button("Browse", () => { using var picker = new FolderBrowserDialog(); if (picker.ShowDialog(this) == DialogResult.OK) cachePath.Text = picker.SelectedPath; }));
-        layout.Controls.Add(Button("Open Folder", () => Guard(() => OpenFolder(cachePath.Text))));
-        layout.Controls.Add(Button("Refresh Info", RefreshCacheInfo));
-        layout.Controls.Add(Button("Clear Cache", () => Guard(ClearCache)));
-        var info = Row(); info.Controls.Add(cacheInfo); cacheTab.Controls.Add(info); info.BringToFront();
-        cachePath.TextChanged += (_, _) => RefreshCacheInfo();
-    }
     private void RefreshCacheInfo()
     {
         try
@@ -301,94 +281,17 @@ internal sealed class NativeWindow : Form
     {
         var layout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(12), AutoScroll = true };
         settingsTab.Controls.Add(layout);
-        layout.Controls.Add(Button("Settings Health Check", CheckSettings));
-        layout.Controls.Add(Button("Repair Settings JSON", () => Guard(RepairSettings)));
+        var cacheRow = Row();
+        cacheRow.Controls.Add(cachePath);
+        cacheRow.Controls.Add(Button("Browse", () => { using var picker = new FolderBrowserDialog(); if (picker.ShowDialog(this) == DialogResult.OK) cachePath.Text = picker.SelectedPath; }));
+        cacheRow.Controls.Add(Button("Open Folder", () => Guard(() => OpenFolder(cachePath.Text))));
+        cacheRow.Controls.Add(Button("Refresh Info", RefreshCacheInfo));
+        cacheRow.Controls.Add(Button("Clear Cache", () => Guard(ClearCache)));
+        layout.Controls.Add(cacheRow);
+        var cacheInfoRow = Row();
+        cacheInfoRow.Controls.Add(cacheInfo);
+        layout.Controls.Add(cacheInfoRow);
+        cachePath.TextChanged += (_, _) => RefreshCacheInfo();
         layout.Controls.Add(Button("Search Packages", () => { tabs.SelectedTab = packagesTab; search.Focus(); }));
-        layout.Controls.Add(Button("Find Projects", () => tabs.SelectedTab = projectsTab));
-        layout.Controls.Add(settingsInfo);
-        CheckSettings();
-    }
-    private void CheckSettings()
-    {
-        var path = PackageCatalog.SettingsPath;
-        try
-        {
-            var json = ManifestStore.Read(path);
-            settingsInfo.Text = $"Settings: {path}\nReadable JSON. Configured repos: {(json["userRepos"] as JsonArray)?.Count ?? 0}.";
-        }
-        catch (Exception exception) { settingsInfo.Text = $"Settings: {path}\nCould not read settings: {exception.Message}. No changes were made."; }
-    }
-    private void RepairSettings()
-    {
-        var path = PackageCatalog.SettingsPath;
-        if (File.Exists(path))
-        {
-            var content = File.ReadAllBytes(path);
-            if (content.Contains((byte)0) || System.Text.Encoding.UTF8.GetString(content).StartsWith("SQLite format 3", StringComparison.Ordinal))
-                throw new InvalidDataException("Settings contains binary/database data; JSON repair is disabled.");
-            try { ManifestStore.Read(path); throw new InvalidOperationException("Settings is already valid JSON; no repair needed."); }
-            catch (System.Text.Json.JsonException) { }
-        }
-        if (!Confirm($"Rebuild missing or invalid settings.json at:\n{path}?\nThe original will be backed up first.")) return;
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        if (File.Exists(path)) File.Copy(path, path + $".corrupt.{DateTime.Now:yyyyMMdd_HHmmss}.bak");
-        var repos = new JsonArray();
-        var repoPath = Path.Combine(ManifestStore.VccRoot, "Repos");
-        if (Directory.Exists(repoPath))
-            foreach (var file in Directory.EnumerateFiles(repoPath, "*.json")) repos.Add(new JsonObject { ["localPath"] = file });
-        File.WriteAllText(path, new JsonObject { ["userRepos"] = repos }.ToJsonString());
-        CheckSettings();
-    }
-
-    private void BuildProjects()
-    {
-        projectsTab.Controls.Add(projectResults);
-        var row = Row();
-        row.Controls.Add(scanButton);
-        row.Controls.Add(cancelButton);
-        row.Controls.Add(Button("Open Folder", () => { if (projectResults.SelectedItem is string path) Guard(() => OpenFolder(path)); }));
-        row.Controls.Add(scanInfo);
-        projectsTab.Controls.Add(row);
-        scanButton.Click += async (_, _) => await ScanProjects();
-        cancelButton.Click += (_, _) => scanCancellation?.Cancel();
-        projectResults.DoubleClick += (_, _) => { if (projectResults.SelectedItem is string path) Guard(() => OpenFolder(path)); };
-    }
-    private async Task ScanProjects()
-    {
-        scanCancellation = new CancellationTokenSource();
-        scanButton.Enabled = false;
-        cancelButton.Enabled = true;
-        projectResults.Items.Clear();
-        var checkedFolders = 0;
-        var skipped = 0;
-        var progress = new Progress<string>(path => { projectResults.Items.Add(path); scanInfo.Text = $"Found {projectResults.Items.Count} projects; checked {checkedFolders} folders."; });
-        try
-        {
-            await Task.Run(() =>
-            {
-                var queue = new Queue<string>(DriveInfo.GetDrives().Where(drive => drive.IsReady && drive.DriveType is DriveType.Fixed or DriveType.Removable or DriveType.Network).Select(drive => drive.RootDirectory.FullName));
-                while (queue.Count > 0 && !scanCancellation.Token.IsCancellationRequested)
-                {
-                    var folder = queue.Dequeue();
-                    checkedFolders++;
-                    if (File.Exists(Path.Combine(folder, "Packages", "vpm-manifest.json")) || File.Exists(Path.Combine(folder, "ProjectSettings", "ProjectVersion.txt")))
-                        ((IProgress<string>)progress).Report(folder);
-                    try
-                    {
-                        foreach (var child in Directory.EnumerateDirectories(folder))
-                        {
-                            var name = Path.GetFileName(child);
-                            if (name is ".git" or "node_modules" or "Library" or "Temp" or "obj" or "bin") continue;
-                            try { if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0) queue.Enqueue(child); }
-                            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { skipped++; }
-                        }
-                    }
-                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { skipped++; }
-                }
-            });
-            scanInfo.Text = $"{(scanCancellation.IsCancellationRequested ? "Cancelled" : "Finished")}: found {projectResults.Items.Count} projects; checked {checkedFolders} folders; skipped {skipped} inaccessible folders.";
-        }
-        catch (Exception exception) { scanInfo.Text = $"Search stopped: {exception.Message}"; }
-        finally { scanButton.Enabled = true; cancelButton.Enabled = false; scanCancellation.Dispose(); scanCancellation = null; }
     }
 }

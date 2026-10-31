@@ -30,12 +30,15 @@ internal static class NativeTests
             window.Show();
             Application.DoEvents();
             var tabs = window.Controls.OfType<TabControl>().Single();
-            if (tabs.TabPages.Count != 4 || tabs.TabPages[3].Text != "Find Projects") return 4;
-            tabs.SelectedTab = tabs.TabPages[2];
-            Application.DoEvents();
-            var findButton = AllControls(tabs.TabPages[2]).OfType<Button>().Single(button => button.Text == "Find Projects");
-            findButton.PerformClick();
-            if (tabs.SelectedTab != tabs.TabPages[3]) return 7;
+            if (tabs.TabPages.Count != 2 || tabs.TabPages[0].Text != "Packages" || tabs.TabPages[1].Text != "Settings") return 4;
+            if (AllControls(window).OfType<Button>().Any(button => button.Text is "Find Projects" or "Search Drives")) return 7;
+            var settings = tabs.TabPages[1];
+            var settingsButtons = AllControls(settings).OfType<Button>().ToArray();
+            if (!settingsButtons.Any(button => button.Text == "Clear Cache") || settingsButtons.Any(button => button.Text is "Settings Health Check" or "Repair Settings JSON")) return 8;
+            var actions = AllControls(tabs.TabPages[0]).OfType<DataGridView>().Single().Rows.Cast<DataGridViewRow>()
+                .Select(row => row.Cells["Action"].Value?.ToString()).OfType<string>().ToArray();
+            var firstAdd = Array.IndexOf(actions, "Add");
+            if (firstAdd >= 0 && actions.Skip(firstAdd).Contains("Remove")) return 9;
             window.Close();
             return 0;
         }
